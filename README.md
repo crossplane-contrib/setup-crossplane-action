@@ -4,13 +4,9 @@ Setup Crossplane cli and add it to the PATH, this action will run the install ba
 
 ## Example
 
-<!-- x-release-please-start-version -->
-
 ```
-uses: grafana/shared-workflows/actions/setup-crossplane@setup-crossplane-v1.0.0
+uses: crossplane-contrib/setup-crossplane-action@main
 with:
   version: v1.18.1 # Version of the Crossplane CLI to install.
 
 ```
-
-<!-- x-release-please-end-version -->
