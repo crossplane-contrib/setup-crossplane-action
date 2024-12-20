@@ -1,5 +1,5 @@
 name: Setup Crossplane
-description: Setup Crossplane cli and add it to the PATH, this action will run the install bash script and store the binary in cache for the next run.
+description: Setup Crossplane cli and add it to the PATH, it will run the install bash script and cache the binary for the next run.
 
 inputs:
   cache-prefix:
