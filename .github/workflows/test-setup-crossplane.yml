@@ -51,7 +51,7 @@ jobs:
         uses: ./
         with:
           cache-prefix: ${{ env.CACHE_PREFIX }}
-          version: v1.18.1
+          version: v2.1.3
 
       - name: Assert cache
         if: fromJson(steps.setup-crossplane.outputs.cache-hit) != matrix.cache-hit
