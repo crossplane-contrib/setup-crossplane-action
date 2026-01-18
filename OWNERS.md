@@ -7,3 +7,4 @@ repository maintainers in their own `OWNERS.md` file.
 ## Maintainers
 
 * Jeroen Op 't Eynde ([Duologic](https://github.com/Duologic))
+* Steven Borrelli ([stevendborrelli](https://github.com/stevendborrelli))
