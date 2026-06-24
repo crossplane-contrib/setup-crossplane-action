@@ -7,5 +7,5 @@ Setup Crossplane cli and add it to the PATH, this action will run the install ba
 ```yaml
 uses: crossplane-contrib/setup-crossplane-action@main
 with:
-  version: v2.1.3 # Version of the Crossplane CLI to install.
+  version: v2.4.0 # Version of the Crossplane CLI to install.
 ```
