@@ -32,7 +32,7 @@ runs:
         path: ${{ github.workspace }}/bin/crossplane
         key: ${{ inputs.cache-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}
 
-    - run: "curl -sL https://raw.githubusercontent.com/crossplane/crossplane/main/install.sh | sh"
+    - run: "curl -sfL https://cli.crossplane.io/install.sh | sh"
       id: install
       shell: bash
       env:
