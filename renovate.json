@@ -1,0 +1,15 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Only bumps the default Crossplane CLI version in action.yaml; GitHub Actions pins are handled by Dependabot.",
+  "enabledManagers": ["custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Default Crossplane CLI version in action.yaml",
+      "managerFilePatterns": ["/^action\\.yaml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+default: (?<currentValue>v\\S+)"
+      ]
+    }
+  ]
+}
