@@ -14,50 +14,208 @@ on:
       - action.yaml
       - .github/workflows/test-setup-crossplane.yml
     types:
-      - edited
       - opened
       - ready_for_review
+      - reopened
       - synchronize
 
   merge_group:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
-  setup-crossplane:
-    runs-on: ubuntu-latest
-    env:
-      # generate a unique cache prefix for each test run, so we can test cache behaviour
-      CACHE_PREFIX: crossplane-${{ github.run_id }}-${{ github.run_attempt }}
-
+  install:
+    name: "Install ${{ matrix.version }} on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        cache-hit: [false, true]
-      max-parallel: 1
-
-    name: "Setup Crossplane (cache hit: ${{ matrix.cache-hit }})"
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-latest
+          - macos-15-intel
+          - windows-latest
+        version:
+          # Published to releases.crossplane.io as "crank". v1.18.1 was the
+          # action's default until v2.1.3.
+          - v1.18.1
+          - v2.1.3
+          # Published to cli.crossplane.io as "crossplane".
+          - v2.5.0
 
     steps:
       - name: Checkout code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          sparse-checkout: |
-            actions/setup-crossplane
+          persist-credentials: false
 
-      - name: "Setup Crossplane (cache: ${{ matrix.cache-hit }})"
-        id: setup-crossplane
+      # Regression setup: a crossplane/ directory in the workspace must be left
+      # alone, and a crossplane already on the PATH must not shadow the
+      # requested version.
+      - name: Plant a crossplane/ directory and a fake crossplane on the PATH
+        shell: bash
+        run: |
+          mkdir -p crossplane
+          echo keep > crossplane/keep.yaml
+          mkdir -p "${RUNNER_TEMP}/fake-bin"
+          printf '#!/bin/sh\necho "Client Version: v0.0.0-fake"\n' > "${RUNNER_TEMP}/fake-bin/crossplane"
+          chmod +x "${RUNNER_TEMP}/fake-bin/crossplane"
+          echo "${RUNNER_TEMP}/fake-bin" >> "${GITHUB_PATH}"
+
+      - name: Setup Crossplane
+        id: setup
+        uses: ./
+        with:
+          version: ${{ matrix.version }}
+          cache: "false"
+
+      - name: Assert installation
+        shell: bash
+        env:
+          WANT_VERSION: ${{ matrix.version }}
+          OUT_VERSION: ${{ steps.setup.outputs.version }}
+          OUT_PATH: ${{ steps.setup.outputs.path }}
+          OUT_DOWNLOADED: ${{ steps.setup.outputs.downloaded }}
+          OUT_CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          [[ "${OUT_VERSION}" == "${WANT_VERSION}" ]] || fail "version output '${OUT_VERSION}' != '${WANT_VERSION}'"
+          [[ "${OUT_DOWNLOADED}" == "true" ]] || fail "downloaded output '${OUT_DOWNLOADED}' != 'true'"
+          [[ "${OUT_CACHE_HIT}" == "false" ]] || fail "cache-hit output '${OUT_CACHE_HIT}' != 'false'"
+          [[ -x "${OUT_PATH}" ]] || fail "path output '${OUT_PATH}' is not an executable file"
+
+          got="$(crossplane version --client | tr -d '\r')"
+          [[ "${got}" == "Client Version: ${WANT_VERSION}" ]] || fail "crossplane on PATH reports '${got}'"
+
+          [[ -f crossplane/keep.yaml ]] || fail "crossplane/ directory in the workspace was modified"
+          [[ ! -e bin ]] || fail "action wrote into the workspace"
+          untracked="$(git status --porcelain --untracked-files=all)"
+          [[ "${untracked}" == "?? crossplane/keep.yaml" ]] || fail "unexpected workspace changes: ${untracked}"
+
+      - name: Run from PowerShell
+        shell: pwsh
+        run: crossplane version --client
+
+  cache:
+    name: "Cache (expect hit: ${{ matrix.cache-hit }})"
+    runs-on: ubuntu-latest
+    env:
+      # Unique per run so the first pass is always a miss and the second a hit.
+      CACHE_PREFIX: crossplane-${{ github.run_id }}-${{ github.run_attempt }}
+    strategy:
+      matrix:
+        cache-hit: [false, true]
+      max-parallel: 1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Crossplane
+        id: setup
         uses: ./
         with:
           cache-prefix: ${{ env.CACHE_PREFIX }}
-          version: v2.1.3
+          version: v2.5.0
+          # linux_amd64 digest from https://cli.crossplane.io/stable/v2.5.0/bin/linux_amd64/crossplane.sha256
+          checksum: 065dd6b40c9ea5fc71e49900d5c924cc0bec7f58375922ddbde6b402f292347e
 
-      - name: Assert cache
-        if: fromJson(steps.setup-crossplane.outputs.cache-hit) != matrix.cache-hit
+      - name: Assert cache behaviour
+        shell: bash
+        env:
+          WANT_HIT: ${{ matrix.cache-hit }}
+          OUT_CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          OUT_DOWNLOADED: ${{ steps.setup.outputs.downloaded }}
         run: |
-          echo "Expected cache hit: '${{ matrix.cache-hit }}' but got '${{ fromJson(steps.setup-crossplane.outputs.cache-hit) }}'"
-          exit 1
+          set -euo pipefail
+          if [[ "${OUT_CACHE_HIT}" != "${WANT_HIT}" ]]; then
+            echo "::error::expected cache-hit '${WANT_HIT}', got '${OUT_CACHE_HIT}'"
+            exit 1
+          fi
+          want_downloaded=true
+          [[ "${WANT_HIT}" == "true" ]] && want_downloaded=false
+          if [[ "${OUT_DOWNLOADED}" != "${want_downloaded}" ]]; then
+            echo "::error::expected downloaded '${want_downloaded}', got '${OUT_DOWNLOADED}'"
+            exit 1
+          fi
+          crossplane version --client
 
-      - name: Check Crossplane CLI works
-        run: crossplane -h
+  reject:
+    name: "Reject: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: wrong checksum
+            version: v2.5.0
+            channel: stable
+            checksum: "0000000000000000000000000000000000000000000000000000000000000000"
+          - name: malformed checksum
+            version: v2.5.0
+            channel: stable
+            checksum: not-a-digest
+          - name: version current
+            version: current
+            channel: stable
+            checksum: ""
+          - name: malformed version
+            version: v2.5
+            channel: stable
+            checksum: ""
+          - name: nonexistent version
+            version: v99.0.0
+            channel: stable
+            checksum: ""
+          - name: invalid channel
+            version: v2.5.0
+            channel: ../stable
+            checksum: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Crossplane
+        id: setup
+        continue-on-error: true
+        uses: ./
+        with:
+          version: ${{ matrix.version }}
+          channel: ${{ matrix.channel }}
+          checksum: ${{ matrix.checksum }}
+          cache: "false"
+
+      - name: Assert the action failed and left nothing behind
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.setup.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${OUTCOME}" != "failure" ]]; then
+            echo "::error::expected the action to fail, outcome was '${OUTCOME}'"
+            exit 1
+          fi
+          if command -v crossplane >/dev/null; then
+            echo "::error::crossplane is on the PATH after a failed install: $(command -v crossplane)"
+            exit 1
+          fi
+          leftovers="$(find "${RUNNER_TEMP}" -path '*setup-crossplane*' -type f 2>/dev/null || true)"
+          if [[ -n "${leftovers}" ]]; then
+            echo "::error::unverified files left behind: ${leftovers}"
+            exit 1
+          fi

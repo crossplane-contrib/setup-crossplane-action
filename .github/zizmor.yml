@@ -1,0 +1,6 @@
+rules:
+  # The tests check out the repository anyway (they inspect the workspace with
+  # git), so the workspace-relative `uses: ./` form is fine here and keeps the
+  # workflow compatible with tools that don't understand `uses: $/` yet.
+  self-repository:
+    disable: true
